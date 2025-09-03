@@ -8,13 +8,13 @@ import joblib
 
 @st.cache_resource
 def load_store_data():
-    return pd.read_csv('C:\\Users\\nikun\\Documents\\Demand Forecasting\\data\\processed\\store_feature_engineered.csv')
+    return pd.read_csv('../data/processed/store_feature_engineered.csv')
 
 
 @st.cache_resource
 def load_model_and_features():
-    model = joblib.load('C:\\Users\\nikun\\Documents\\Demand Forecasting\\models\\xgb_random_search_model.pkl')
-    with open('C:\\Users\\nikun\\Documents\\Demand Forecasting\\models\\feature_list.txt', 'r') as f:
+    model = joblib.load('../models/xgb_random_search_model.pkl')
+    with open('../models/feature_list.txt', 'r') as f:
         feature_list = [line.strip() for line in f]
     return model, feature_list
 
