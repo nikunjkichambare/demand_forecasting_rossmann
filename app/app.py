@@ -5,10 +5,11 @@ import os
 from sklearn.preprocessing import OneHotEncoder
 import joblib
 
+
 @st.cache_resource
 def load_store_data():
-    # Load preprocessed store features once
     return pd.read_csv('C:\\Users\\nikun\\Documents\\Demand Forecasting\\data\\processed\\store_feature_engineered.csv')
+
 
 @st.cache_resource
 def load_model_and_features():
@@ -17,13 +18,12 @@ def load_model_and_features():
         feature_list = [line.strip() for line in f]
     return model, feature_list
 
+
 def preprocess_input(df_raw, store_df, feature_list):
     df = df_raw.copy()
 
-    # Handle missing Open if any
     df['Open'].fillna(1, inplace=True)
-    
-    # Parse Date and extract features
+
     df['Date'] = pd.to_datetime(df['Date'])
     df['Year'] = df['Date'].dt.year
     df['Month'] = df['Date'].dt.month
@@ -31,30 +31,24 @@ def preprocess_input(df_raw, store_df, feature_list):
     df['WeekOfYear'] = df['Date'].dt.isocalendar().week.astype(int)
     df['Quarter'] = df['Date'].dt.quarter
     df['IsWeekend'] = df['Date'].dt.dayofweek.isin([5, 6]).astype(int)
-    
-    # One-hot encode categorical columns
+
     cat_cols = ['DayOfWeek', 'Open', 'Promo', 'SchoolHoliday']
     ohe = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
     cat_ohe = ohe.fit_transform(df[cat_cols])
     cat_ohe_df = pd.DataFrame(cat_ohe, columns=ohe.get_feature_names_out(cat_cols), index=df.index)
     df = pd.concat([df.drop(columns=cat_cols), cat_ohe_df], axis=1)
-    
-    # One-hot encode StateHoliday separately
+
     ohe_sh = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
     stateholiday_ohe = ohe_sh.fit_transform(df[['StateHoliday']])
     stateholiday_df = pd.DataFrame(stateholiday_ohe, columns=ohe_sh.get_feature_names_out(['StateHoliday']), index=df.index)
     df = pd.concat([df.drop(columns=['StateHoliday']), stateholiday_df], axis=1)
-    
-    # Drop original Date column after extraction
+
     df.drop(columns=['Date'], inplace=True)
 
-    # Merge with store features
     df = df.merge(store_df, how='left', on='Store')
-    
-    # Fill missing store data after merge
+
     df.fillna(0, inplace=True)
 
-    # Ensure columns match model features exactly (fill missing with 0)
     for col in feature_list:
         if col not in df.columns:
             df[col] = 0
@@ -62,22 +56,58 @@ def preprocess_input(df_raw, store_df, feature_list):
 
     return df
 
-def main():
-    st.title("Sales Prediction App with Feature Engineering")
 
-    uploaded_file = st.file_uploader("Upload CSV with raw features", type=['csv'])
+def generate_future_dates(store_df, weeks=6, start_date=None):
+    if start_date is None:
+        start_date = pd.Timestamp.today().normalize()
+
+    future_dates = [start_date + pd.Timedelta(days=i) for i in range(weeks * 7)]
+    stores = store_df['Store'].unique()
+
+    future_list = []
+    for store in stores:
+        for dt in future_dates:
+            future_list.append({'Store': store, 'Date': dt})
+
+    future_df = pd.DataFrame(future_list)
+
+    future_df['Year'] = future_df['Date'].dt.year
+    future_df['Month'] = future_df['Date'].dt.month
+    future_df['Day'] = future_df['Date'].dt.day
+    future_df['DayOfWeek'] = future_df['Date'].dt.dayofweek + 1
+    future_df['WeekOfYear'] = future_df['Date'].dt.isocalendar().week.astype(int)
+    future_df['Quarter'] = future_df['Date'].dt.quarter
+    future_df['IsWeekend'] = future_df['Date'].dt.dayofweek.isin([5, 6]).astype(int)
+
+    future_df['Open'] = 1
+    future_df['Promo'] = 0
+    future_df['SchoolHoliday'] = 0
+    future_df['StateHoliday'] = '0'
+
+    return future_df
+
+
+def main():
+    st.title("Sales Prediction App with 6-Week Future Forecast")
+
+    forecast_start_date = st.date_input(
+        "Select forecast start date (default today)",
+        value=pd.Timestamp.today().date()
+    )
+
+    # Display the selected date in DD-MM-YYYY format below the picker
+    st.write("Selected date (DD-MM-YYYY):", forecast_start_date.strftime("%d-%m-%Y"))
+
+    store_df = load_store_data()
+    model, feature_list = load_model_and_features()
+
+    uploaded_file = st.file_uploader("Upload CSV with raw features (Id, Store, DayOfWeek, Date, Open, Promo, StateHoliday, SchoolHoliday)", type=['csv'])
     if uploaded_file:
         raw_df = pd.read_csv(uploaded_file)
-
-        store_df = load_store_data()
-        model, feature_list = load_model_and_features()
-
         st.write("Raw Input Preview:", raw_df.head())
 
         try:
             X = preprocess_input(raw_df, store_df, feature_list)
-            st.write("Processed Features for Model Input:", X.head())
-
             preds_log = model.predict(X)
             preds = np.expm1(preds_log)
 
@@ -86,14 +116,43 @@ def main():
                 'Sales_Prediction': preds
             })
 
+            st.subheader("Predictions on Uploaded Data")
             st.write(result_df)
 
-            # Provide option to download predictions
-            csv = result_df.to_csv(index=False).encode()
-            st.download_button("Download Predictions CSV", csv, "predictions.csv", "text/csv")
+            future_df = generate_future_dates(store_df, weeks=6, start_date=pd.Timestamp(forecast_start_date))
+            st.write(f"Generating future features for {len(future_df)} rows")
+
+            future_X = preprocess_input(future_df, store_df, feature_list)
+
+            future_preds_log = model.predict(future_X)
+            future_preds = np.expm1(future_preds_log)
+
+            future_df['Sales_Prediction'] = future_preds
+
+            # Format dates as DD-MM-YYYY before display & download
+            future_df['Date'] = future_df['Date'].dt.strftime('%d-%m-%Y')
+
+            st.subheader("6-Week Daily Sales Forecast")
+            st.write(future_df[['Store', 'Date', 'Sales_Prediction']].head(20))
+
+            weekly_forecast = future_df.groupby(['Store', 'WeekOfYear'])['Sales_Prediction'].mean().reset_index()
+            weekly_forecast['Forecast_Week_Start'] = weekly_forecast['WeekOfYear'].apply(
+                lambda w: pd.Timestamp.fromisocalendar(forecast_start_date.year, w, 1)
+            )
+            weekly_forecast['Forecast_Week_Start'] = weekly_forecast['Forecast_Week_Start'].dt.strftime('%d-%m-%Y')
+
+            st.subheader("6-Week Average Weekly Sales Forecast per Store")
+            st.write(weekly_forecast.head(20))
+
+            csv_future = future_df.to_csv(index=False).encode()
+            st.download_button("Download 6-Week Daily Forecast CSV", csv_future, "6_week_daily_forecast.csv", "text/csv")
+
+            csv_weekly = weekly_forecast.to_csv(index=False).encode()
+            st.download_button("Download 6-Week Weekly Average Forecast CSV", csv_weekly, "6_week_weekly_avg_forecast.csv", "text/csv")
 
         except Exception as e:
             st.error(f"Error during preprocessing or prediction: {e}")
+
 
 if __name__ == "__main__":
     main()
