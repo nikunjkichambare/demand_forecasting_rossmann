@@ -21,8 +21,8 @@ def train_model(train_X, y_train, n_iter=50, cv=3, random_state=42):
 
         model = XGBRegressor(
             objective='reg:squarederror',
-            tree_method='gpu_hist',
-            predictor='gpu_predictor',
+            tree_method='hist',
+            device='cuda',
             random_state=random_state,
             n_jobs=-1,
         )
