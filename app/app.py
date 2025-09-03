@@ -5,17 +5,35 @@ import os
 from sklearn.preprocessing import OneHotEncoder
 import joblib
 
+# Define paths dynamically relative to this app.py file location
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STORE_DATA_PATH = os.path.join(BASE_DIR, 'data', 'processed', 'store_feature_engineered.csv')
+MODEL_PATH = os.path.join(BASE_DIR, 'models', 'xgb_random_search_model.pkl')
+FEATURE_LIST_PATH = os.path.join(BASE_DIR, 'models', 'feature_list.txt')
+
 
 @st.cache_resource
 def load_store_data():
-    return pd.read_csv('../data/processed/store_feature_engineered.csv')
+    try:
+        return pd.read_csv(STORE_DATA_PATH)
+    except FileNotFoundError:
+        st.error(f"Store data file not found at {STORE_DATA_PATH}. Please check the data folder.")
+        raise
 
 
 @st.cache_resource
 def load_model_and_features():
-    model = joblib.load('../models/xgb_random_search_model.pkl')
-    with open('../models/feature_list.txt', 'r') as f:
-        feature_list = [line.strip() for line in f]
+    try:
+        model = joblib.load(MODEL_PATH)
+    except FileNotFoundError:
+        st.error(f"Model file not found at {MODEL_PATH}. Please check the models folder.")
+        raise
+    try:
+        with open(FEATURE_LIST_PATH, 'r') as f:
+            feature_list = [line.strip() for line in f]
+    except FileNotFoundError:
+        st.error(f"Feature list file not found at {FEATURE_LIST_PATH}. Please check the models folder.")
+        raise
     return model, feature_list
 
 
@@ -94,14 +112,15 @@ def main():
         "Select forecast start date (default today)",
         value=pd.Timestamp.today().date()
     )
-
-    # Display the selected date in DD-MM-YYYY format below the picker
     st.write("Selected date (DD-MM-YYYY):", forecast_start_date.strftime("%d-%m-%Y"))
 
     store_df = load_store_data()
     model, feature_list = load_model_and_features()
 
-    uploaded_file = st.file_uploader("Upload CSV with raw features (Id, Store, DayOfWeek, Date, Open, Promo, StateHoliday, SchoolHoliday)", type=['csv'])
+    uploaded_file = st.file_uploader(
+        "Upload CSV with raw features (Id, Store, DayOfWeek, Date, Open, Promo, StateHoliday, SchoolHoliday)", 
+        type=['csv']
+    )
     if uploaded_file:
         raw_df = pd.read_csv(uploaded_file)
         st.write("Raw Input Preview:", raw_df.head())
@@ -128,8 +147,6 @@ def main():
             future_preds = np.expm1(future_preds_log)
 
             future_df['Sales_Prediction'] = future_preds
-
-            # Format dates as DD-MM-YYYY before display & download
             future_df['Date'] = future_df['Date'].dt.strftime('%d-%m-%Y')
 
             st.subheader("6-Week Daily Sales Forecast")
